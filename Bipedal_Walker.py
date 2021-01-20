@@ -36,6 +36,11 @@ best_reward = -999
 x = []
 y = []
 
+# Set seeds for reproducible results
+seed = 0
+env.seed(seed)
+
+
 
 ''' TAKEOVER TO THE AGENT!!!!!'''
 actor_local = 'best_checkpoint_actor_loc_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
