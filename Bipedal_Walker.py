@@ -40,18 +40,8 @@ y = []
 seed = 0
 env.seed(seed)
 
-
-
-''' TAKEOVER TO THE AGENT!!!!!'''
-actor_local = 'best_checkpoint_actor_loc_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-actor_target = 'best_checkpoint_actor_tar_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-critic_local = 'best_checkpoint_critic_loc_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-critic_target = 'best_checkpoint_critic_tar_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-''' TAKEOVER TO THE AGENT!!!!!'''
-actor_local_policy = 'best_checkpoint_actor_loc_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-actor_target_policy = 'best_checkpoint_actor_tar_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-critic_local_policy = 'best_checkpoint_critic_loc_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
-critic_target_policy = 'best_checkpoint_critic_tar_mem_imp_add_reinit_both_200_var11121211112111121212112121121.pth'
+# Sigma value for exploration
+sigma = 0.1
 
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
@@ -82,15 +72,15 @@ for i_episode in range(max_episodes):
     print("Episode: ", i_episode)
     
     
-    ''' START OF THE LOOP FOR EACH EPISODE '''
+    ''' START OF THE TRAINING LOOP FOR EACH EPISODE '''
     for t in range(episode_range):
 
-        # Take an action with the agent in the current state
+        # Take an action with the agent with added noise in the current state
         # For the first n episodes take random actions
         if i_episode < n_rand_actions:
             action = env.action_space.sample()
         else:
-            action = agent.act(state)    
+            action = agent.act_noise(state, sigma)    
         
         # Get the feedback from the environment by performing the action
         next_state, reward, done, info = env.step(action)
@@ -116,8 +106,23 @@ for i_episode in range(max_episodes):
     print('Accumulated reward was: ', accumulated_reward)
     if accumulated_reward > best_reward:
         best_reward = accumulated_reward
-        agent.save_network()      
+        agent.save_network() 
         
-
+    ''' START AN EVALUATION OF THE CURRENT POLICY AFTER 100 EPISODES 
+        FOR 10 EPISODES '''
+    if i_episode%100==0:
+        average_rew = 0
+        nr_eval_episodes = 10
+        for eval_episodes in range(nr_eval_episodes):
+            state = env.reset()
+            while not done:
+                action = agent.act(state) 
+                state, reward, done, info = env.step(action)
+                average_rew += reward
+        average_rew /= nr_eval_episodes
+        print("---------------------------------------")
+        print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew)
+        print("---------------------------------------")
+        
 
 env.close()
