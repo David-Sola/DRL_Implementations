@@ -64,7 +64,6 @@ class Agent():
         # Replay memory
         self.memory = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
 
-        self.memory_environment = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE_BEST_EP, random_seed)
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
         
@@ -83,17 +82,17 @@ class Agent():
         
     def save_network(self):
 
-        torch.save(agent.actor_local.state_dict(), self.actor_local_path)
-        torch.save(agent.actor_target.state_dict(), self.actor_target_path)
-        torch.save(agent.critic_local.state_dict(), self.critic_local_path)
-        torch.save(agent.critic_target.state_dict(), self.critic_arget_path)  
+        torch.save(self.actor_local.state_dict(), self.actor_local_path)
+        torch.save(self.state_dict(), self.actor_target_path)
+        torch.save(self.critic_local.state_dict(), self.critic_local_path)
+        torch.save(self.critic_target.state_dict(), self.critic_arget_path)  
         
     def load_network(self):
 
-        torch.save(agent.actor_local.state_dict(), self.actor_local_path)
-        torch.save(agent.actor_target.state_dict(), self.actor_target_path)
-        torch.save(agent.critic_local.state_dict(), self.critic_local_path)
-        torch.save(agent.critic_target.state_dict(), self.critic_arget_path)
+        torch.save(self.actor_local.state_dict(), self.actor_local_path)
+        torch.save(self.actor_target.state_dict(), self.actor_target_path)
+        torch.save(self.critic_local.state_dict(), self.critic_local_path)
+        torch.save(self.critic_target.state_dict(), self.critic_arget_path)
         
     def step(self):
         '''
@@ -179,7 +178,7 @@ class Agent():
         self.noise.reset()
         
 
-    def learn(self, experiences, gamma, learn_pred):
+    def learn(self, experiences, gamma):
         '''
         Update policy and value parameters using given batch of experience tuples.
         Q_targets = r+ gamma * critic_target(next_state, actor_target(next_state)
@@ -200,22 +199,22 @@ class Agent():
         self.total_it += 1
         states, actions, rewards, next_states, dones = experiences
         
-         with torch.no_grad():
-             # Select action according to policy and add clipped noise
-             noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
-             next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+        with torch.no_grad():  
+            # Select action according to policy and add clipped noise
+            noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
+            next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
              
-             # Compute the target Q value
-             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
-             target_q = torch.min(target_Q1, target_Q2)
-             target_q = rewards + (gamma * target_q * (1 - dones))
+            # Compute the target Q value
+            target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
+            target_q = torch.min(target_Q1, target_Q2)
+            target_q = rewards + (gamma * target_q * (1 - dones))
              
         current_Q1, current_Q2 = self.critic_local(states, actions)
         critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
-        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
+        #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
         self.critic_optimizer.step()
         
         if self.total_it % POLICY_FREQ == 0:

@@ -84,7 +84,7 @@ for i_episode in range(max_episodes):
         # Take an action with the agent in the current state
         # For the first n episodes take random actions
         if i_episode < n_rand_actions:
-            env.action_space.sample()
+            action = env.action_space.sample()
         else:
             action = agent.act(state)    
         
