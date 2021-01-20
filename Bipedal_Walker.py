@@ -93,7 +93,8 @@ for i_episode in range(max_episodes):
         
         # Take a step with the agent in order to learn but collect first 
         # sufficient amount of data
-        agent.step()
+        if i_episode > n_rand_actions:
+            agent.step()
         
         # Assign the next state to the current state
         state = next_state
