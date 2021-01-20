@@ -110,11 +110,11 @@ for i_episode in range(max_episodes):
         
     ''' START AN EVALUATION OF THE CURRENT POLICY AFTER 100 EPISODES 
         FOR 10 EPISODES '''
-    if i_episode%100==0:
+    if i_episode%100==0 and i_episode != 0:
         average_rew = 0
         nr_eval_episodes = 10
         for eval_episodes in range(nr_eval_episodes):
-            state = env.reset()
+            state, done = env.reset(), False
             while not done:
                 action = agent.act(state) 
                 state, reward, done, info = env.step(action)
