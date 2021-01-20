@@ -111,7 +111,7 @@ class Agent():
             experiences = self.memory.sample()
             self.learn(experiences, GAMMA)
 
-    def act(self, state, sigma):
+    def act(self, state):
         '''
         Functionality to determine the action in the current state.
         Additionally to the current action which is determined by the actor a normal distribution will be added to the
