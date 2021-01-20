@@ -26,7 +26,7 @@ max_episodes = 10000
 episode_range = 1000
 
 # How many episodes random actions shall be taken
-n_rand_actions = 30
+n_rand_actions = 100
 
 # Best reward from all episodes
 best_reward = -999
