@@ -10,7 +10,6 @@ Description:
 
 import gym
 from TD3_Agent import Agent
-import torch
 import matplotlib.pyplot as plt
 
 env = gym.make('BipedalWalker-v3')
@@ -30,7 +29,7 @@ episode_range = 1000
 n_rand_actions = 30
 
 # Best reward from all episodes
-best_reward = 0
+best_reward = -999
 
 # Empty lists for x and y values to be able to plot the accumulated reward after
 # the episodes

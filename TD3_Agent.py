@@ -83,16 +83,16 @@ class Agent():
     def save_network(self):
 
         torch.save(self.actor_local.state_dict(), self.actor_local_path)
-        torch.save(self.state_dict(), self.actor_target_path)
+        torch.save(self.actor_target.state_dict(), self.actor_target_path)
         torch.save(self.critic_local.state_dict(), self.critic_local_path)
-        torch.save(self.critic_target.state_dict(), self.critic_arget_path)  
+        torch.save(self.critic_target.state_dict(), self.critic_target_path)  
         
     def load_network(self):
 
         torch.save(self.actor_local.state_dict(), self.actor_local_path)
         torch.save(self.actor_target.state_dict(), self.actor_target_path)
         torch.save(self.critic_local.state_dict(), self.critic_local_path)
-        torch.save(self.critic_target.state_dict(), self.critic_arget_path)
+        torch.save(self.critic_target.state_dict(), self.critic_target_path)
         
     def step(self):
         '''
