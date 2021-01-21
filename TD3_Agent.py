@@ -61,6 +61,10 @@ class Agent():
         self.critic_target = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
         
+        self.critic_local2 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_target2 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_optimizer2 = optim.Adam(self.critic_local.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
+        
         # Replay memory
         self.memory = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
 
@@ -198,35 +202,67 @@ class Agent():
         '''
         self.total_it += 1
         states, actions, rewards, next_states, dones = experiences
-        
-        with torch.no_grad():  
-            # Select action according to policy and add clipped noise
-            noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
-            next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
-             
-            # Compute the target Q value
-            target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
-            target_q = torch.min(target_Q1, target_Q2)
-            target_q = rewards + (gamma * target_q * (1 - dones))
-             
-        current_Q1, current_Q2 = self.critic_local(states, actions)
-        critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
-        #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
-        self.critic_optimizer.step()
-        
-        if self.total_it % POLICY_FREQ == 0:
-            #Compute actor loss
-            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean()
+        ''' ADD AN ADDITIONAL CRITIC IN ORDER TO STABILIZE THE LEARNING '''
+        if np.random.rand()>0.5:
+            with torch.no_grad(): 
+                
+                # Select action according to policy and add clipped noise
+                noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
+                next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+                 
+                # Compute the target Q value
+                target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
+                target_q = torch.min(target_Q1, target_Q2)
+                target_q = rewards + (gamma * target_q * (1 - dones))
+                 
+            current_Q1, current_Q2 = self.critic_local(states, actions)
+            critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
+            #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
+            self.critic_optimizer.step()
             
-            #Optimize the actor
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
-            self.soft_update(self.critic_local, self.critic_target, self.tau)
-            self.soft_update(self.actor_local, self.actor_target, self.tau)
+            if self.total_it % POLICY_FREQ == 0:
+                #Compute actor loss
+                actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean()
+                
+                #Optimize the actor
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                self.actor_optimizer.step()
+                self.soft_update(self.critic_local, self.critic_target, self.tau)
+                self.soft_update(self.actor_local, self.actor_target, self.tau)
+        else:
+            with torch.no_grad(): 
+            
+                # Select action according to policy and add clipped noise
+                noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
+                next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+                 
+                # Compute the target Q value
+                target_Q1, target_Q2 = self.critic_target2(next_states, next_actions)
+                target_q = torch.min(target_Q1, target_Q2)
+                target_q = rewards + (gamma * target_q * (1 - dones))
+             
+            current_Q1, current_Q2 = self.critic_local2(states, actions)
+            critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
+            self.critic_optimizer2.zero_grad()
+            critic_loss.backward()
+            ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
+            #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
+            self.critic_optimizer2.step()
+        
+            if self.total_it % POLICY_FREQ == 0:
+                #Compute actor loss
+                actor_loss = -self.critic_local2.Q1(states, self.actor_local(states)).mean()
+                
+                #Optimize the actor
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                self.actor_optimizer.step()
+                self.soft_update(self.critic_local, self.critic_target, self.tau)
+                self.soft_update(self.actor_local, self.actor_target, self.tau)
         
 
     def exp_lr_scheduler(self, optimizer, decayed_lr):

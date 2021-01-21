@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 
 # Change betweend Hardcore or non Hardcore version
-hc = 1
+hc = 0
 
 if hc==1:
     env = gym.make('BipedalWalkerHardcore-v3')
