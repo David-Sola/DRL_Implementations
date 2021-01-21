@@ -18,7 +18,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import copy
-import pickle
 
 
 
@@ -63,6 +62,7 @@ class Agent():
         
         # Replay memory
         self.memory = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
+        self.memory_best = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
 
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
@@ -73,12 +73,16 @@ class Agent():
         self.critic_target_path = 'best_checkpoint_critic_tar_mem.pth'
 
         self.t_step = 0
+        self.additional_learning = 0.9
 
-    def add_memory(self, state, action, reward, next_state, done):
+    def add_memory(self, state, action, reward, next_state, done, add_best=0):
         '''
         Add memories to the replay Bugger
         '''
         self.memory.add(state, action, reward, next_state, done)
+        
+        if add_best:
+            self.memory_best.add(state, action, reward, next_state, done)
         
     def save_network(self):
 
@@ -109,6 +113,11 @@ class Agent():
         # Learn only if enough samples have already been collected
         if self.memory.get_len() > BATCH_SIZE:
             experiences = self.memory.sample()
+            self.learn(experiences, GAMMA)
+            
+        ''' ADDITIONAL LEARNING FROM BEST MEMORY'''
+        if self.memory_best.get_len() > BATCH_SIZE and np.random.rand() > self.additional_learning:
+            experiences = self.memory_best.sample()
             self.learn(experiences, GAMMA)
 
     def act(self, state):

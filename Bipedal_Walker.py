@@ -99,6 +99,9 @@ for i_episode in range(max_episodes):
         # Add the state, action, next_state, reward transition into the replay buffer
         agent.add_memory(state, action, reward, next_state, done)
         
+        if reward > 0:
+            agent.add_memory(state, action, reward, next_state, done, 1)
+        
         # Take a step with the agent in order to learn but collect first 
         # sufficient amount of data
         if i_episode > n_rand_actions:
