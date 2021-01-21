@@ -12,7 +12,15 @@ import gym
 from TD3_Agent import Agent
 import matplotlib.pyplot as plt
 
-env = gym.make('BipedalWalker-v3')
+
+# Change betweend Hardcore or non Hardcore version
+hc = 1
+
+if hc==1:
+    env = gym.make('BipedalWalkerHardcore-v3')
+else:
+    env = gym.make('BipedalWalker-v3')
+
 
 # Helper variables
 
