@@ -68,11 +68,11 @@ class Agent():
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
         
-        self.act_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        self.actor_local_path = 'best_checkpoint_actor_loc_mem.pth' + self.act_time
-        self.actor_target_path = 'best_checkpoint_actor_tar_mem.pth' + self.act_time
-        self.critic_local_path = 'best_checkpoint_critic_loc_mem.pth' + self.act_time
-        self.critic_target_path = 'best_checkpoint_critic_tar_mem.pth' + self.act_time
+        self.act_time = datetime.datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
+        self.actor_local_path = self.act_time +'_best_checkpoint_actor_loc_mem.pth' 
+        self.actor_target_path = self.act_time +'_best_checkpoint_actor_tar_mem.pth' 
+        self.critic_local_path = self.act_time +'_best_checkpoint_critic_loc_mem.pth'
+        self.critic_target_path = self.act_time +'_best_checkpoint_critic_tar_mem.pth'
 
         self.t_step = 0
         self.additional_learning = 0.9
