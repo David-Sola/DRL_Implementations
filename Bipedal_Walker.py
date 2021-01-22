@@ -53,6 +53,7 @@ sigma = 0.1
 
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
+best_agent = Agent(24, 4, random_seed=2)
 
 ''' START OF THE WHOLE TRAINING LOOP '''
 for i_episode in range(max_episodes):
@@ -81,8 +82,10 @@ for i_episode in range(max_episodes):
         # For the first n episodes take random actions
         if i_episode < n_rand_actions:
             action = env.action_space.sample()
+        elif i_episode%2==0:
+            action = agent.act_noise(state, sigma) 
         else:
-            action = agent.act_noise(state, sigma)    
+            action = best_agent.act(state) 
         
         # Get the feedback from the environment by performing the action
         next_state, reward, done, info = env.step(action)
@@ -113,6 +116,7 @@ for i_episode in range(max_episodes):
     if accumulated_reward > best_reward:
         best_reward = accumulated_reward
         agent.save_network() 
+        best_agent.load_network()
         
     ''' START AN EVALUATION OF THE CURRENT POLICY AFTER 100 EPISODES 
         FOR 10 EPISODES '''
