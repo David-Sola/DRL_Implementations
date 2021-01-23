@@ -107,6 +107,9 @@ for i_episode in range(max_episodes):
         # Assign the next state to the current state
         state = next_state
         
+        # Reinit the memory after 500 episodes
+        if i_episode%500==0:
+            agent.reset_memory()
         # If the episode is done finish the loop
         if done:
             break

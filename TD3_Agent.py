@@ -85,6 +85,10 @@ class Agent():
         
         if add_best:
             self.memory_best.add(state, action, reward, next_state, done)
+            
+    def reset_memory(self):
+        self.memor.memory.clear()
+        self.memor_best.memory.clear()
         
     def save_network(self):
 
