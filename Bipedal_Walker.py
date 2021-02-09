@@ -60,7 +60,7 @@ agent = Agent(24, 4, random_seed=2)
 ''' START OF THE WHOLE TRAINING LOOP '''
 for i_episode in range(max_episodes):
     
-    total_int += 1
+    
     x.append(i_episode)
     y.append(accumulated_reward)
     accumulated_reward = 0
@@ -75,7 +75,8 @@ for i_episode in range(max_episodes):
     
     ''' START OF THE TRAINING LOOP FOR EACH EPISODE '''
     for t in range(episode_range):
-
+        
+        total_int += 1
         # Take an action with the agent with added noise in the current state
         # For the first n episodes take random actions
         if i_episode < n_rand_actions:
