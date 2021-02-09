@@ -62,16 +62,6 @@ for i_episode in range(max_episodes):
     y.append(accumulated_reward)
     accumulated_reward = 0
 
-    # Plot the current status of progress every 30 episodes and close it after 2 
-    # episodes
-    if i_episode%30==0:
-        plt.pause(0.1)
-        plt.plot(x,y)
-        plt.title('Predicted next state lower cirtic LR, Best memory with additional learning and best actor, action noise, additional memory with positive memories and adding very positive, reinit mem, 2 critics with small actor loss adaption, only Q1, rewrite main memory and reset best mem,, no actor delay learning, best policy actor')
-        plt.pause(0.1)
-    elif i_episode%2==0:
-        plt.close()
-
     # Get the first state from the environment
     state = env.reset()
 
@@ -129,6 +119,15 @@ for i_episode in range(max_episodes):
                 state, reward, done, info = env.step(action)
                 average_rew += reward
         average_rew /= nr_eval_episodes
+        
+        if average_rew>250:
+            plt.pause(0.1)
+            plt.plot(x,y)
+            plt.title('Reward')
+            plt.pause(0.1)
+            plt.savefig('Reward.png')
+        else:
+            plt.close()
         print("---------------------------------------")
         print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew)
         print("---------------------------------------")

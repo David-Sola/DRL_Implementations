@@ -18,7 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import copy
-import pickle
+import datetime
 
 
 
@@ -67,10 +67,11 @@ class Agent():
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
         
-        self.actor_local_path = 'best_checkpoint_actor_loc_mem.pth'
-        self.actor_target_path = 'best_checkpoint_actor_tar_mem.pth'
-        self.critic_local_path = 'best_checkpoint_critic_loc_mem.pth'
-        self.critic_target_path = 'best_checkpoint_critic_tar_mem.pth'
+        self.act_time = datetime.datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
+        self.actor_local_path = self.act_time +'_best_checkpoint_actor_loc_mem.pth' 
+        self.actor_target_path = self.act_time +'_best_checkpoint_actor_tar_mem.pth' 
+        self.critic_local_path = self.act_time +'_best_checkpoint_critic_loc_mem.pth'
+        self.critic_target_path = self.act_time +'_best_checkpoint_critic_tar_mem.pth'
 
         self.t_step = 0
 
@@ -87,12 +88,18 @@ class Agent():
         torch.save(self.critic_local.state_dict(), self.critic_local_path)
         torch.save(self.critic_target.state_dict(), self.critic_target_path)  
         
-    def load_network(self):
-
-        torch.save(self.actor_local.state_dict(), self.actor_local_path)
-        torch.save(self.actor_target.state_dict(), self.actor_target_path)
-        torch.save(self.critic_local.state_dict(), self.critic_local_path)
-        torch.save(self.critic_target.state_dict(), self.critic_target_path)
+    def load_network(self, own_path=1, act_loc='', act_tar='', cr_loc='', cr_tar=''):
+        
+        if own_path==1:
+            self.actor_local.load_state_dict(torch.load(self.actor_local_path))
+            self.actor_target.load_state_dict(torch.load(self.actor_target_path))
+            self.critic_local.load_state_dict(torch.load(self.critic_local_path))
+            self.critic_target.load_state_dict(torch.load(self.critic_target_path))
+        else:
+            self.actor_local.load_state_dict(torch.load(act_loc))
+            self.actor_target.load_state_dict(torch.load(act_tar))
+            self.critic_local.load_state_dict(torch.load(cr_loc))
+            self.critic_target.load_state_dict(torch.load(cr_tar))
         
     def step(self):
         '''
