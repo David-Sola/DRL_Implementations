@@ -31,7 +31,7 @@ accumulated_reward = 0
 max_episodes = 10000
 
 # Maximum number of timesteps per Episode
-episode_range = 1000
+episode_range = 300
 
 # How many episodes random actions shall be taken
 n_rand_actions = 100
@@ -105,6 +105,9 @@ for i_episode in range(max_episodes):
     print('Accumulated reward was: ', accumulated_reward)
     if accumulated_reward > best_reward:
         best_reward = accumulated_reward
+        
+        if best_reward > 50:
+            episode_range = 1000
         agent.save_network() 
         
     ''' START AN EVALUATION OF THE CURRENT POLICY AFTER 100 EPISODES 
