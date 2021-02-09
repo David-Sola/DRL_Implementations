@@ -129,7 +129,7 @@ for i_episode in range(max_episodes):
         else:
             plt.close()
         print("---------------------------------------")
-        print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew)
+        print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew, ' Hardcore activated: ', hc)
         print("---------------------------------------")
         
 
