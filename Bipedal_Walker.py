@@ -51,13 +51,16 @@ env.seed(seed)
 # Sigma value for exploration
 sigma = 0.1
 
+# Counter for number of interactions withe nvironemtn
+total_int = 0
+
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
 
 ''' START OF THE WHOLE TRAINING LOOP '''
 for i_episode in range(max_episodes):
     
-       
+    total_int += 1
     x.append(i_episode)
     y.append(accumulated_reward)
     accumulated_reward = 0
@@ -132,7 +135,7 @@ for i_episode in range(max_episodes):
         else:
             plt.close()
         print("---------------------------------------")
-        print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew, ' Hardcore activated: ', hc)
+        print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew, ' Hardcore activated: ', hc, ' Total Interactions: ', total_int)
         print("---------------------------------------")
         
 
