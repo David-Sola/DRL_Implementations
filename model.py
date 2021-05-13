@@ -89,7 +89,7 @@ class Critic(nn.Module):
     def forward(self, state, action):
         state_action = torch.cat([state, action], 1)
         
-        xs = F.relu(self.fc1(state_action))
+        xs = torch.relu(self.fc1(state_action))
         x1 = torch.relu(self.fc2(xs))
         q1 = self.fc3(x1)
         
@@ -102,10 +102,28 @@ class Critic(nn.Module):
         
         state_action = torch.cat([state, action], 1)
         
-        xs = F.relu(self.fc1(state_action))
+        xs = torch.relu(self.fc1(state_action))
         x1 = torch.relu(self.fc2(xs))
         q1 = self.fc3(x1)
         return q1
+
+class State_predictor(nn.Module):
+    def __init__(self, input_space, output_space, fc1_units=512, fc2_units=256):
+        super(State_predictor, self).__init__()
+        self.fc1 = nn.Linear(input_space, fc1_units)
+        self.fc1.to(device)
+        self.fc2 = nn.Linear(fc1_units, fc2_units)
+        self.fc2.to(device)
+        self.fc3 = nn.Linear(fc2_units, output_space)
+        self.fc3.to(device)
+        #self.fcn = nn.Linear()
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+
 
 
 

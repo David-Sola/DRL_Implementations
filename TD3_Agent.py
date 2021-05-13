@@ -12,6 +12,7 @@ import numpy as np
 import random
 from collections import namedtuple, deque
 from model import Actor, Critic
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -22,8 +23,8 @@ import datetime
 
 
 
-BUFFER_SIZE = int(1e7)  # replay buffer size
-BATCH_SIZE = 100      # minibatch size
+BUFFER_SIZE = int(1e5)  # replay buffer size
+BATCH_SIZE = 64      # minibatch size
 GAMMA = 0.98            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 1e-4         # learning rate of the actor
@@ -40,7 +41,7 @@ class Agent():
     The agent who interacts with the environment and learns it
     '''
 
-    def __init__(self, state_space, action_space, out_fcn=nn.Tanh(), fc1_units=256, fc2_units=256, random_seed=2):
+    def __init__(self, state_space, action_space, out_fcn=nn.Tanh(), fc1_units=512, fc2_units=256, random_seed=2):
 
         self.state_space = state_space
         self.action_space = action_space
@@ -63,6 +64,7 @@ class Agent():
         
         # Replay memory
         self.memory = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
+        self.memory_prioritized = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
 
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
@@ -75,11 +77,17 @@ class Agent():
 
         self.t_step = 0
 
-    def add_memory(self, state, action, reward, next_state, done):
+    def add_memory(self, state, action, reward, next_state, done, priority_for_current_memory):
         '''
         Add memories to the replay Bugger
         '''
-        self.memory.add(state, action, reward, next_state, done)
+        self.memory.add(state, action, reward, next_state, done, priority_for_current_memory)
+
+    def add_memory_prioritized(self, state, action, reward, next_state, done, priority_for_current_memory):
+        '''
+        Add memories to the replay Bugger
+        '''
+        self.memory_prioritized.add(state, action, reward, next_state, done, priority_for_current_memory)
         
     def save_network(self):
 
@@ -204,7 +212,16 @@ class Agent():
         :return: -
         '''
         self.total_it += 1
+        '''
+        if self.total_it%1000==0:
+            x = list(range(0, len(self.memory.priority)))
+            plt.close()
+            plt.pause(0.1)
+            plt.plot(x, self.memory.priority, '*')
+            plt.pause(0.1)
+        '''
         states, actions, rewards, next_states, dones = experiences
+        
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
@@ -273,9 +290,12 @@ class ReplayBuffer():
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
         self.experience = namedtuple("Experience", field_names=["state", "action", "rewards", "next_states", "dones"])
+        self.priority = []
         self.seed = random.seed(seed)
+        self.priority_discount = 0.8
+        self.count = 1
 
-    def add(self, state, action, reward, next_state, done):
+    def add(self, state, action, reward, next_state, done, priority_for_current_memory=0):
         '''
         Adding a nre state, action, reward, nect_state, done tuplt to the replay memory
         :param state: Current state
@@ -286,16 +306,33 @@ class ReplayBuffer():
         :return: -
         '''
         e = self.experience(state, action, reward, next_state, done)
+        self.priority.append(priority_for_current_memory)
         self.memory.append(e)
 
-    def sample(self):
+    def sample(self, play_random=0):
         '''
         Radnomly sample a batch
         :return: A random selected batch of the memory
         '''
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        experiences = random.sample(self.memory, k=self.batch_size)
+        self.count += 1
+        if self.count%3==0 and play_random==1:
+
+            zipped_data = random.choices(list(enumerate(self.memory)), weights=self.priority, k=self.batch_size)
+            index, experiences = zip(*zipped_data)
+
+            for i in range(len(index)):
+                if self.priority[index[i]] > 0.3:
+                    self.priority_discount = 0.8
+                else:
+                    self.priority_discount = 0.95
+                self.priority[index[i]] = max(self.priority[index[i]] * self.priority_discount, 0.01)
+
+        else:
+
+            experiences = random.sample(self.memory, k=self.batch_size)
+            
 
         states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
         actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device)
