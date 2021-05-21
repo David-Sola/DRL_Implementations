@@ -27,8 +27,8 @@ BUFFER_SIZE = int(1e5)  # replay buffer size
 BATCH_SIZE = 64      # minibatch size
 GAMMA = 0.98            # discount factor
 TAU = 1e-3              # for soft update of target parameters
-LR_ACTOR = 1e-4         # learning rate of the actor
-LR_CRITIC = 5e-4       # learning rate of the critic
+LR_ACTOR = 5e-5         # learning rate of the actor
+LR_CRITIC = 1e-4       # learning rate of the critic
 WEIGHT_DECAY = 0        # L2 weight decay
 POLICY_FREQ = 2
 NOISE_CLIP = 0.5
@@ -77,6 +77,9 @@ class Agent():
 
         self.t_step = 0
 
+        self.highest_loss = 0
+        self.loss = []
+
     def add_memory(self, state, action, reward, next_state, done, priority_for_current_memory):
         '''
         Add memories to the replay Bugger
@@ -109,7 +112,7 @@ class Agent():
             self.critic_local.load_state_dict(torch.load(cr_loc))
             self.critic_target.load_state_dict(torch.load(cr_tar))
         
-    def step(self):
+    def step(self, predictor_agent):
         '''
         Get the current state, action, reward, next_state and done tuple and store it in the replay buffer.
         Also check if already enough samples have been collected in order to start a training step
@@ -124,7 +127,7 @@ class Agent():
         # Learn only if enough samples have already been collected
         if self.memory.get_len() > BATCH_SIZE:
             experiences = self.memory.sample()
-            self.learn(experiences, GAMMA)
+            self.learn(experiences, GAMMA, predictor_agent)
 
     def act(self, state):
         '''
@@ -193,7 +196,7 @@ class Agent():
         self.noise.reset()
         
 
-    def learn(self, experiences, gamma):
+    def learn(self, experiences, gamma, predictor_agent):
         '''
         Update policy and value parameters using given batch of experience tuples.
         Q_targets = r+ gamma * critic_target(next_state, actor_target(next_state)
@@ -213,25 +216,33 @@ class Agent():
         '''
         self.total_it += 1
         '''
-        if self.total_it%1000==0:
-            x = list(range(0, len(self.memory.priority)))
+        if self.total_it%5000==0:
+            x = list(range(0, len(self.loss)))
             plt.close()
             plt.pause(0.1)
-            plt.plot(x, self.memory.priority, '*')
+            plt.plot(x, self.loss, 'y*')
             plt.pause(0.1)
         '''
+
         states, actions, rewards, next_states, dones = experiences
+
         
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
             noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
             next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+
+            state_action = torch.cat([next_states, actions], 1)
+            predicted_states = predictor_agent(state_action)
+            loss = F.mse_loss(predicted_states, next_states)
+            loss *= 250
+            self.loss.append(loss)
              
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
             target_q = torch.min(target_Q1, target_Q2)
-            target_q = rewards + (gamma * target_q * (1 - dones))
+            target_q = rewards + (gamma * target_q * (1 - dones)) + loss
              
         current_Q1, current_Q2 = self.critic_local(states, actions)
         critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
@@ -251,6 +262,20 @@ class Agent():
             self.actor_optimizer.step()
             self.soft_update(self.critic_local, self.critic_target, self.tau)
             self.soft_update(self.actor_local, self.actor_target, self.tau)
+
+        # Add one additional learning step after each 10 learning steps, with the highest loss
+
+        if critic_loss > self.highest_loss:
+            experiences = states, actions, rewards, next_states, dones
+            self.highest_loss = critic_loss
+
+        if self.total_it%10==0:
+            #print(self.highest_loss)
+            self.highest_loss = 0
+            self.learn(experiences, GAMMA, predictor_agent)
+
+
+
         
 
     def exp_lr_scheduler(self, optimizer, decayed_lr):
