@@ -17,6 +17,7 @@ import torch.optim as optim
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import deque
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -42,7 +43,7 @@ max_episodes = 10000
 episode_range = 500
 
 # How many episodes random actions shall be taken
-n_rand_actions = 10
+n_rand_actions = 50
 
 # Best reward from all episodes
 best_reward = -999
@@ -51,6 +52,9 @@ best_reward = -999
 # the episodes
 x = []
 y = []
+last_100_average = deque(100*[0], 100)
+add_to_100_average = 0
+plot_count = 1
 
 # Set seeds for reproducible results
 seed = 0
@@ -66,6 +70,7 @@ imitation_counter = 1
 total_int = 0
 accumulated_loss = 0
 nr_of_its = 1
+tau = 0.98
 
 update_predictor = 1
 
@@ -77,25 +82,62 @@ agent_imitate.load_network(own_path=0, act_loc='HC_best_checkpoint_actor_loc_mem
 
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
-optimizer_imitation = optim.Adam(agent.actor_local.parameters(), lr=0.005)
+agent_to_imitate_from = Agent(24, 4, random_seed=2)
+optimizer_imitation = optim.Adam(agent_to_imitate_from.actor_local.parameters(), lr=0.005)
+optimizer_imitation_critic = optim.Adam(agent_to_imitate_from.critic_local.parameters(), lr=0.005)
 state_predictor = State_predictor(28, 24)
 next_state_predictor = State_predictor(24, 24)
 optimizer = optim.Adam(state_predictor.parameters(), lr=0.01)
 loss_fcn = nn.MSELoss()
+loss_fcn_critic = nn.MSELoss()
 
-def imitation_learnen(agent, agent_imitate, optimizer_imitation, loss_fcn):
+def soft_network_update(agent_to_imitate_from, agent, tau=0.995):
+    
+    agent.soft_update_directly(agent_to_imitate_from.actor_local, agent.actor_local, tau)
+    agent.soft_update_directly(agent_to_imitate_from.actor_local, agent.actor_target, tau)
+    agent.soft_update_directly(agent_to_imitate_from.critic_local, agent.critic_local, tau)
+    agent.soft_update_directly(agent_to_imitate_from.critic_local, agent.critic_target, tau)
+
+
+def imitation_learnen(agent_to_imitate_from, agent_imitate, optimizer_imitation, loss_fcn):
 
     if agent.memory.get_len() > 2000:
 
         experiences = agent_imitate.memory.sample()
         states, actions, rewards, next_states, dones = experiences
 
-        actions_policy = agent.actor_local(states)
+        actions_policy = agent_to_imitate_from.actor_local(states)
         loss = loss_fcn(actions_policy, actions)
         optimizer_imitation.zero_grad()
         loss.backward()
         optimizer_imitation.step()
         return loss.cpu().detach().numpy()
+
+def imitation_learnen_critic_target(agent_to_imitate_from, agent_imitate, optimizer_imitation_critic, loss_fcn_critic):
+
+    if agent.memory.get_len() > 2000:
+
+        experiences = agent_imitate.memory.sample()
+        states, actions, rewards, next_states, dones = experiences
+        with torch.no_grad():
+            noise = (torch.randn_like(actions) * 0.1).clamp(-0.5, 0.5)  
+            next_actions = (agent_imitate.actor_local(next_states) + noise).clamp(-1,1)
+
+            
+            target_pol_Q1, target_pol_Q2 = agent_to_imitate_from.critic_target(next_states, next_actions)
+            target_pol = torch.min(target_pol_Q1, target_pol_Q2)
+            target_pol = rewards + (0.98 * target_pol * (1-dones))
+
+        current_pol_1, current_pol_2 = agent_to_imitate_from.critic_local(states, actions)
+        loss = F.mse_loss(current_pol_1, target_pol) + F.mse_loss(current_pol_2, target_pol)
+        optimizer_imitation_critic.zero_grad()
+        loss.backward()
+        optimizer_imitation_critic.step()
+        agent_to_imitate_from.soft_update(agent_to_imitate_from.critic_local, agent_to_imitate_from.critic_target, 0.99)
+        #agent.soft_update(agent_imitate.actor_local, agent.actor_local, 0.001)
+        #agent.soft_update(agent_imitate.actor_local, agent.actor_target, 0.0001)
+        #optimizer_target_imitation.step()
+        #optimizer_local_imitation.step()
 
         
 
@@ -140,19 +182,24 @@ for i_episode in range(max_episodes):
         sigma = min(sigma, 1)
         increase_sigma_counter = 0
     '''
-    
-    x.append(i_episode)
-    y.append(accumulated_reward)
+    if add_to_100_average == 1:
+        last_100_average.appendleft(accumulated_reward)
+        #print(last_100_average)
+        x.append(plot_count)
+        y.append(sum(last_100_average)/100)
+        plot_count+=1
+
     accumulated_reward = 0
 
     # Get the first state from the environment
     state = env.reset()
 
     # Print some usefull stuff
+    print("100 Episode average: ", sum(last_100_average)/100)
     print("Best reward: ", best_reward)
     print("Episode: ", i_episode)
-    print("Accumulated Loss: ", accumulated_loss/nr_of_its)
-    print("Sigma: ", sigma)
+    print("Tau: ", tau)
+    tau = max(tau*0.997, 0.05)
     nr_of_its = 1
     accumulated_loss = 0
 
@@ -167,12 +214,13 @@ for i_episode in range(max_episodes):
         if i_episode%imitation_counter!=0:
             nr_of_its += 1
             total_int += 1
+            add_to_100_average = 1
             # Take an action with the agent with added noise in the current state
             # For the first n episodes take random actions
             if i_episode < n_rand_actions:
                 action = env.action_space.sample()
             else:
-                action = agent.act_noise(state, sigma)    
+                action = agent.act(state) 
             
             # Get the feedback from the environment by performing the action
             next_state, reward, done, info = env.step(action)
@@ -182,8 +230,14 @@ for i_episode in range(max_episodes):
             #    reward += min(curiosity_by_state_prediction(i_episode, agent, state_predictor, state, action, next_state, optimizer, loss_fcn, update_predictor), 1)
             
             # Accumulate the reward to get the reward at the end of the episode
-            agent.add_memory(state, action, reward, next_state, done, 0.2)
+            
             accumulated_reward = accumulated_reward + reward
+            soft_network_update(agent_to_imitate_from, agent, tau)
+            agent.add_memory(state, action, reward, next_state, done, 0.2)
+
+            
+            
+                
             
             '''
             priority_for_current_memory = curiosity_by_state_prediction(i_episode, agent, state_predictor, state, action, next_state, optimizer, loss_fcn, update_predictor)
@@ -209,10 +263,19 @@ for i_episode in range(max_episodes):
             # sufficient amount of data
             if i_episode > n_rand_actions:
                 
-                agent.step(state_predictor)
+                #agent.step(state_predictor)
 
-                if i_episode%2==0:
-                    loss = imitation_learnen(agent, agent_imitate, optimizer_imitation, loss_fcn)
+                if i_episode < 100:
+                    for i in range(10):
+                        agent.step(state_predictor)
+                else:
+                    agent.step(state_predictor)
+                
+                
+                
+                #if i_episode%2==0:
+                    #loss = imitation_learnen(agent, agent_imitate, optimizer_imitation, loss_fcn)
+                    #imitation_learnen_critic_target(agent_to_imitate_from, agent_imitate, optimizer_imitation_critic, loss_fcn_critic)
                 #accumulated_loss += loss
             
             # Assign the next state to the current state
@@ -223,6 +286,7 @@ for i_episode in range(max_episodes):
                 break
 
         else:
+            add_to_100_average = 0
             nr_of_its += 1
             total_int += 1
 
@@ -233,7 +297,10 @@ for i_episode in range(max_episodes):
             #accumulated_reward += reward
             agent_imitate.add_memory(state, action_to_imitate, reward, next_state, done, 0.2)
             if i_episode > n_rand_actions:
-                loss = imitation_learnen(agent, agent_imitate, optimizer_imitation, loss_fcn)
+                loss = imitation_learnen(agent_to_imitate_from, agent_imitate, optimizer_imitation, loss_fcn)
+                if i_episode < 650:
+                    imitation_learnen_critic_target(agent_to_imitate_from, agent_imitate, optimizer_imitation_critic, loss_fcn_critic)
+                
                 #agent.step(state_predictor)
                 #accumulated_loss += loss
 
@@ -267,15 +334,15 @@ for i_episode in range(max_episodes):
                 average_rew += reward
         average_rew /= nr_eval_episodes
         
-        if average_rew>250:
-            agent.save_network() 
-            plt.pause(0.1)
-            plt.plot(x,y)
-            plt.title('Reward')
-            plt.pause(0.1)
-            plt.savefig('Reward.png')
-        else:
-            plt.close()
+        #if average_rew>250:
+        agent.save_network() 
+        plt.pause(0.1)
+        plt.plot(x,y)
+        plt.title('Reward')
+        plt.pause(0.1)
+        plt.savefig('Reward.png')
+        #else:
+            #plt.close()
         print("---------------------------------------")
         print('Evaluation over ', nr_eval_episodes, ' episodes. Average reward: ', average_rew, ' Hardcore activated: ', hc, ' Total Interactions: ', total_int)
         print("---------------------------------------")

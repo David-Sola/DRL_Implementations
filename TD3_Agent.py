@@ -27,7 +27,7 @@ BUFFER_SIZE = int(1e5)  # replay buffer size
 BATCH_SIZE = 64      # minibatch size
 GAMMA = 0.98            # discount factor
 TAU = 1e-3              # for soft update of target parameters
-LR_ACTOR = 5e-5         # learning rate of the actor
+LR_ACTOR = 5e-5        # learning rate of the actor
 LR_CRITIC = 1e-4       # learning rate of the critic
 WEIGHT_DECAY = 0        # L2 weight decay
 POLICY_FREQ = 2
@@ -238,6 +238,7 @@ class Agent():
             loss = F.mse_loss(predicted_states, next_states)
             loss *= 250
             self.loss.append(loss)
+
              
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
@@ -264,16 +265,16 @@ class Agent():
             self.soft_update(self.actor_local, self.actor_target, self.tau)
 
         # Add one additional learning step after each 10 learning steps, with the highest loss
-
+  
         if critic_loss > self.highest_loss:
             experiences = states, actions, rewards, next_states, dones
             self.highest_loss = critic_loss
 
-        if self.total_it%10==0:
+        if self.total_it%5==0:
             #print(self.highest_loss)
             self.highest_loss = 0
             self.learn(experiences, GAMMA, predictor_agent)
-
+ 
 
 
         
@@ -300,6 +301,18 @@ class Agent():
         '''
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
+
+    def soft_update_directly(self, local_model, target_model, tau):
+        '''
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+        :param local_mode:
+        :param target_model:
+        :param tau:
+        :return:
+        '''
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
+
 
 class ReplayBuffer():
     def __init__(self, action_size, buffer_size, batch_size, seed):
