@@ -24,8 +24,8 @@ import datetime
 
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 64      # minibatch size
-GAMMA = 0.98            # discount factor
+BATCH_SIZE = 128      # minibatch size
+GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 5e-5        # learning rate of the actor
 LR_CRITIC = 1e-4       # learning rate of the critic
@@ -51,6 +51,7 @@ class Agent():
         self.total_it = 0
         self.sigma = POLICY_NOISE
         self.tau=TAU
+        self.tau_noise_curiosity = 1
 
         # The actor network
         self.actor_local = Actor(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
@@ -225,25 +226,30 @@ class Agent():
         '''
 
         states, actions, rewards, next_states, dones = experiences
+        #self.tau_noise_curiosity = max(self.tau_noise_curiosity*0.999993, 0.01)
 
         
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
-            noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
+            noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP) * self.tau_noise_curiosity
+            #noise = 0
             next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+
+            next_log_prob = self.actor_local.evaluate(next_states)
+            entropy = -0.1*next_log_prob
 
             state_action = torch.cat([next_states, actions], 1)
             predicted_states = predictor_agent(state_action)
             loss = F.mse_loss(predicted_states, next_states)
-            loss *= 250
-            self.loss.append(loss)
+            loss *= 500
+            #self.loss.append(loss)
 
              
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
             target_q = torch.min(target_Q1, target_Q2)
-            target_q = rewards + (gamma * target_q * (1 - dones)) + loss
+            target_q = rewards + (gamma * target_q * (1 - dones)) + loss + entropy
              
         current_Q1, current_Q2 = self.critic_local(states, actions)
         critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
@@ -255,7 +261,9 @@ class Agent():
         
         if self.total_it % POLICY_FREQ == 0:
             #Compute actor loss
-            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean()
+            log_prob = self.actor_local.evaluate(states)
+            entropy = -0.1*next_log_prob
+            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean() - entropy.mean() + loss.mean()
             
             #Optimize the actor
             self.actor_optimizer.zero_grad()

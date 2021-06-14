@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torch.distributions import Normal
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -48,6 +49,15 @@ class Actor(nn.Module):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         return self.fcn(self.fc3(x))
+
+    def evaluate(self, x):
+        action = self.forward(x)
+        dist = Normal(0, 1)
+        log_prob = dist.log_prob(action)
+        real_log_prob = log_prob - torch.log(1-action.pow(2) + 1e-7)
+
+        return real_log_prob
+
 
 
 class Critic(nn.Module):
