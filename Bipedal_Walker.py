@@ -23,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # Change betweend Hardcore or non Hardcore version
-hc = 1
+hc = 0
 
 if hc==1:
     env = gym.make('BipedalWalkerHardcore-v3')
@@ -43,7 +43,7 @@ max_episodes = 10000
 episode_range = 500
 
 # How many episodes random actions shall be taken
-n_rand_actions = 50
+n_rand_actions = 20
 
 # Best reward from all episodes
 best_reward = -999
@@ -75,17 +75,13 @@ tau = 2
 update_predictor = 1
 
 # Creation of the agent which shall be trained
-agent_imitate = Agent(24, 4, random_seed=2)
-agent_imitate.load_network(own_path=0, act_loc='HC_best_checkpoint_actor_loc_mem.pth', act_tar='HC_best_checkpoint_actor_tar_mem.pth', cr_loc='HC_best_checkpoint_critic_loc_mem.pth', cr_tar='HC_best_checkpoint_critic_tar_mem.pth')
+
 
 
 
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
-agent_to_imitate_from = Agent(24, 4, random_seed=2)
-optimizer_agent = optim.Adam(agent.actor_local.parameters(), lr=0.005)
-optimizer_imitation = optim.Adam(agent_to_imitate_from.actor_local.parameters(), lr=0.005)
-optimizer_imitation_critic = optim.Adam(agent_to_imitate_from.critic_local.parameters(), lr=0.005)
+
 state_predictor = State_predictor(28, 24)
 next_state_predictor = State_predictor(24, 24)
 optimizer = optim.Adam(state_predictor.parameters(), lr=0.01)
@@ -214,7 +210,7 @@ for i_episode in range(max_episodes):
     print("Best reward: ", best_reward)
     print("Episode: ", i_episode)
     print("Tau: ", tau)
-    print("Internal Tau: ", agent.tau_noise_curiosity)
+    print("Internal Tau: ", agent.actor_local.log_alpha)
     print("loss: ", accumulated_loss/nr_of_its)
     tau = max(tau*0.99, 0.05)
     nr_of_its = 1
@@ -228,7 +224,7 @@ for i_episode in range(max_episodes):
     ''' START OF THE TRAINING LOOP FOR EACH EPISODE '''
     for t in range(episode_range):
 
-        if i_episode%imitation_counter!=0:
+        if i_episode%1==0:
             nr_of_its += 1
             total_int += 1
             add_to_100_average = 1
@@ -241,110 +237,24 @@ for i_episode in range(max_episodes):
             
             # Get the feedback from the environment by performing the action
             next_state, reward, done, info = env.step(action)
-            imitation_learnen(agent_to_imitate_from, agent_imitate, optimizer_imitation, loss_fcn)
-            action_to_imitate = agent_imitate.act(state)
-            loss = 0.5*np.sum(np.abs(action - action_to_imitate))
 
-            if loss is not None:
-                accumulated_loss -= loss
             curiosity_by_state_prediction(i_episode, agent, state_predictor, state, action, next_state, optimizer, loss_fcn, update_predictor)
-
-            #if i_episode > n_rand_actions:
-            #    reward += min(curiosity_by_state_prediction(i_episode, agent, state_predictor, state, action, next_state, optimizer, loss_fcn, update_predictor), 1)
-            
-            # Accumulate the reward to get the reward at the end of the episode
-            
+           
             accumulated_reward = accumulated_reward + reward
-            reward -= loss
             
             agent.add_memory(state, action, reward, next_state, done, 0.2)
 
-            
-            
-                
-            
-            '''
-            priority_for_current_memory = curiosity_by_state_prediction(i_episode, agent, state_predictor, state, action, next_state, optimizer, loss_fcn, update_predictor)
-            accumulated_loss += priority_for_current_memory
-            if reward == -100:
-                reward = -100     
-            elif reward < 0:
-                reward = 0
-            if i_episode < 200:
-                reward = reward
-            else:
-                reward = reward + min(priority_for_current_memory, 0.5)
-            accumulated_reward = accumulated_reward + reward
-            # Add the state, action, next_state, reward transition into the replay buffer
-            if i_episode < 200:
-                agent.add_memory(state, action, reward, next_state, done, 0.2)
-            elif priority_for_current_memory > 0.01:
-                
-                agent.add_memory(state, action, reward, next_state, done, priority_for_current_memory)
-            '''
-            
-            # Take a step with the agent in order to learn but collect first 
-            # sufficient amount of data
-            if i_episode > n_rand_actions:
-                
-                #agent.step(state_predictor)
-
-                if i_episode < 100:
-                    for i in range(7):
-                        imitation_learnen_policy(agent, agent_imitate, optimizer_agent, loss_fcn)
-                        agent.step(state_predictor)
-                else:
-                    agent.step(state_predictor)
-
-            if i_episode < 500 and i_episode > 100 and(i_episode%5==0 and nr_of_its%10==0):
-                print("wohooo")
-                imitation_learnen_policy(agent, agent_imitate, optimizer_agent, loss_fcn)
-
-            
-            
-
-                
-                
-                
-                
-                #if i_episode%2==0:
-                    #loss = imitation_learnen(agent, agent_imitate, optimizer_imitation, loss_fcn)
-                    #imitation_learnen_critic_target(agent_to_imitate_from, agent_imitate, optimizer_imitation_critic, loss_fcn_critic)
-                #accumulated_loss += loss
-            
-            # Assign the next state to the current state
-            state = next_state
-            
             # If the episode is done finish the loop
             if done:
                 break
 
-        else:
-            add_to_100_average = 0
-            nr_of_its += 1
-            total_int += 1
-
-
-            action_to_imitate = agent_imitate.act(state)
-            # Get the feedback from the environment by performing the action
-            next_state, reward, done, info = env.step(action_to_imitate)
-            #accumulated_reward += reward
-            agent_imitate.add_memory(state, action_to_imitate, reward, next_state, done, 0.2)
+            
+            # Take a step with the agent in order to learn but collect first 
+            # sufficient amount of data
             if i_episode > n_rand_actions:
-                loss = imitation_learnen(agent_to_imitate_from, agent_imitate, optimizer_imitation, loss_fcn)
-                #if i_episode < 650:
-                #    imitation_learnen_critic_target(agent_to_imitate_from, agent_imitate, optimizer_imitation_critic, loss_fcn_critic)
-                
-                #agent.step(state_predictor)
-                #accumulated_loss += loss
 
-            #print(loss)
+                agent.step(state_predictor)
 
-            # Assign the next state to the current state
-            state = next_state
-
-            if done:
-                break
 
                
     print('Accumulated reward was: ', accumulated_reward)

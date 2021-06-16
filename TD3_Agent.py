@@ -24,7 +24,7 @@ import datetime
 
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 128      # minibatch size
+BATCH_SIZE = 64      # minibatch size
 GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 5e-5        # learning rate of the actor
@@ -232,27 +232,26 @@ class Agent():
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
-            noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP) * self.tau_noise_curiosity
+            #noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP) * self.tau_noise_curiosity
             #noise = 0
-            next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
-
+            next_actions = self.actor_target(next_states)
             next_log_prob = self.actor_local.evaluate(next_states)
-            entropy = -0.1*next_log_prob
 
-            state_action = torch.cat([next_states, actions], 1)
-            predicted_states = predictor_agent(state_action)
-            loss = F.mse_loss(predicted_states, next_states)
-            loss *= 500
+            entropy = -self.actor_local.log_alpha.exp()*next_log_prob
+
+            #state_action = torch.cat([next_states, actions], 1)
+            #predicted_states = predictor_agent(state_action)
+            #loss = F.mse_loss(predicted_states, next_states)
+            #loss *= 500
             #self.loss.append(loss)
-
              
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
             target_q = torch.min(target_Q1, target_Q2)
-            target_q = rewards + (gamma * target_q * (1 - dones)) + loss + entropy
+            target_q = rewards + (gamma * (target_q + entropy.mean()) * (1 - dones))
              
         current_Q1, current_Q2 = self.critic_local(states, actions)
-        critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
+        critic_loss = F.smooth_l1_loss(current_Q1, target_q) + F.smooth_l1_loss(current_Q2, target_q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
@@ -262,8 +261,8 @@ class Agent():
         if self.total_it % POLICY_FREQ == 0:
             #Compute actor loss
             log_prob = self.actor_local.evaluate(states)
-            entropy = -0.1*next_log_prob
-            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean() - entropy.mean() + loss.mean()
+            entropy = -self.actor_local.log_alpha.exp()*log_prob
+            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean() - entropy.mean()
             
             #Optimize the actor
             self.actor_optimizer.zero_grad()
@@ -271,6 +270,11 @@ class Agent():
             self.actor_optimizer.step()
             self.soft_update(self.critic_local, self.critic_target, self.tau)
             self.soft_update(self.actor_local, self.actor_target, self.tau)
+
+            self.actor_local.log_alpha_optimizer.zero_grad()
+            alpha_loss = -(self.actor_local.log_alpha.exp() * (log_prob -4).detach()).mean()
+            alpha_loss.backward()
+            self.actor_local.log_alpha_optimizer.step()
 
         # Add one additional learning step after each 10 learning steps, with the highest loss
   

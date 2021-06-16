@@ -14,6 +14,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.distributions import Normal
+import torch.optim as optim
+
+init_alpha      = 0.1
+lr_alpha        = 0.0001
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -35,27 +39,42 @@ class Actor(nn.Module):
         self.fc1.to(device)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
         self.fc2.to(device)
-        self.fc3 = nn.Linear(fc2_units, action_space)
-        self.fc3.to(device)
+        self.fc_mu = nn.Linear(fc2_units,action_space)
+        self.fc_std  = nn.Linear(fc2_units,action_space)
+
+
+        self.log_alpha = torch.tensor(init_alpha)
+        self.log_alpha.requires_grad = True
+        self.log_alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha)
         self.fcn = out_fcn
         self.reset_parameters()
 
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        return self.fcn(self.fc3(x))
+        mu = self.fc_mu(x)
+        std = F.softplus(self.fc_std(x))
+        dist = Normal(mu, std)
+        action = dist.rsample()
+        log_prob = dist.log_prob(action)
+        real_action = torch.tanh(action)
+        real_log_prob = log_prob - torch.log(1-torch.tanh(action).pow(2) + 1e-7)
+        return real_action
 
     def evaluate(self, x):
-        action = self.forward(x)
-        dist = Normal(0, 1)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        mu = self.fc_mu(x)
+        std = F.softplus(self.fc_std(x))
+        dist = Normal(mu, std)
+        action = dist.rsample()
         log_prob = dist.log_prob(action)
-        real_log_prob = log_prob - torch.log(1-action.pow(2) + 1e-7)
-
+        real_action = torch.tanh(action)
+        real_log_prob = log_prob - torch.log(1-torch.tanh(action).pow(2) + 1e-7)
         return real_log_prob
 
 
