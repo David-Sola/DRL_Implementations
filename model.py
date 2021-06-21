@@ -8,7 +8,7 @@ Description:
     Genral class for creating a neural network for Actor critic DRL 
     with the PyTorch Framework
 """
-
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,7 +19,7 @@ import torch.optim as optim
 init_alpha      = 0.1
 lr_alpha        = 0.0001
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
 def hidden_init(layer):
     fan_in = layer.weight.data.size()[0]
@@ -27,130 +27,128 @@ def hidden_init(layer):
     return (-lim, lim)
 
 class Actor(nn.Module):
-    def __init__(self, state_space, action_space, out_fcn=nn.Tanh(), fc1_units=35, fc2_units=35):
+    def __init__(self, lr, state_space, action_space, max_action=1, out_fcn=nn.Tanh(), fc1_units=512, fc2_units=256, name='actor', chkpt_dir='tmp/sac'):
         '''
         :param state_space: The observation or state space of the environment
         :param action_space: The action space of the environment
         :param hidden_layers: The hidden layers to create the neural network
         '''
         super(Actor, self).__init__()
+        self.checkpoint_dir = chkpt_dir
+        self.name = name
+        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_SAC')
+        self.reparam_noise = 1e-6
+        self.max_action = max_action
 
         self.fc1 = nn.Linear(state_space, fc1_units)
-        self.fc1.to(device)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
-        self.fc2.to(device)
         self.fc_mu = nn.Linear(fc2_units,action_space)
-        self.fc_std  = nn.Linear(fc2_units,action_space)
+        self.fc_sigma  = nn.Linear(fc2_units,action_space)
 
+        self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
 
-        self.log_alpha = torch.tensor(init_alpha)
-        self.log_alpha.requires_grad = True
-        self.log_alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha)
-        self.fcn = out_fcn
-        self.reset_parameters()
+    def forward(self, state):
+        prob = F.relu(self.fc1(state))
+        prob = F.relu(self.fc2(prob))
+        
+        mu = self.fc_mu(prob)
+        sigma = self.fc_sigma(prob)
 
-    def reset_parameters(self):
-        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
-        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
+        sigma = torch.clamp(sigma, min=self.reparam_noise, max=1)
+        return mu, sigma
 
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        mu = self.fc_mu(x)
-        std = F.softplus(self.fc_std(x))
-        dist = Normal(mu, std)
-        action = dist.rsample()
-        log_prob = dist.log_prob(action)
-        real_action = torch.tanh(action)
-        real_log_prob = log_prob - torch.log(1-torch.tanh(action).pow(2) + 1e-7)
-        return real_action
+    def sample_normal(self, state, reparameterize=True):
+        mu, sigma = self.forward(state)
+        probabilities = Normal(mu, sigma)
 
-    def evaluate(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        mu = self.fc_mu(x)
-        std = F.softplus(self.fc_std(x))
-        dist = Normal(mu, std)
-        action = dist.rsample()
-        log_prob = dist.log_prob(action)
-        real_action = torch.tanh(action)
-        real_log_prob = log_prob - torch.log(1-torch.tanh(action).pow(2) + 1e-7)
-        return real_log_prob
+        if reparameterize:
+            actions = probabilities.rsample()
+        else:
+            actions = probabilities.sample()
+
+        action = torch.tanh(actions)#*torch.tensor(self.max_action).to(self.device)
+        log_probs = probabilities.log_prob(actions)
+        log_probs -= torch.log(1-action.pow(2)+self.reparam_noise)
+        log_probs = log_probs.sum()
+
+        return action, log_probs
+
+    def save_checkpoint(self):
+        torch.save(self.state_dict(), self.checkpoint_file)
+
+    def load_checkpoint(self):
+        self.load_state_dict(torch.load(self.checkpoint_file))
+
 
 
 
 class Critic(nn.Module):
-    def __init__(self, state_space, action_space, out_fcn=nn.Tanh(), fc1_units=35, fc2_units=35):
+    def __init__(self, state_space, action_space, name='Critic',  out_fcn=nn.Tanh(), fc1_units=512, fc2_units=256, lr=0.0003, chkpt_dir='tmp/sac'):
         '''
         :param state_space: The observation or state space of the environment
         :param action_space: The action space of the environment
         :param hidden_layers: The hidden layers to create the neural network
         '''
         super(Critic, self).__init__()
+        self.checkpoint_dir = chkpt_dir
+        self.name = name
+        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_SAC')
         
         # Q1 architecture
         self.fc1 = nn.Linear(state_space + action_space, fc1_units)
-        self.fc1.to(device)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
-        self.fc2.to(device)
         self.fc3 = nn.Linear(fc2_units, 1)
-        self.fc3.to(device)
         
-        # Q2 architecture
-        self.fc4 = nn.Linear(state_space + action_space, fc1_units)
-        self.fc4.to(device)
-        self.fc5 = nn.Linear(fc1_units, fc2_units)
-        self.fc5.to(device)
-        self.fc6 = nn.Linear(fc2_units, 1)
-        self.fc6.to(device)
-        self.fcn = out_fcn
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
-        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
-        
-        self.fc4.weight.data.uniform_(*hidden_init(self.fc1))
-        self.fc5.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc6.weight.data.uniform_(-3e-3, 3e-3)
+        self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
 
     def forward(self, state, action):
-        state_action = torch.cat([state, action], 1)
+        state_action = torch.cat([state, action], dim=1)
         
-        xs = torch.relu(self.fc1(state_action))
-        x1 = torch.relu(self.fc2(xs))
-        q1 = self.fc3(x1)
-        
-        xs = torch.relu(self.fc4(state_action))
-        x2 = torch.relu(self.fc5(xs)) 
-        q2 = self.fc6(x2)
-        return q1, q2
+        xs = F.relu(self.fc1(state_action))
+        x1 = F.relu(self.fc2(xs))
+        q = self.fc3(x1)
+
+        return q
     
-    def Q1(self, state, action):
-        
-        state_action = torch.cat([state, action], 1)
-        
-        xs = torch.relu(self.fc1(state_action))
-        x1 = torch.relu(self.fc2(xs))
-        q1 = self.fc3(x1)
-        return q1
+    def save_checkpoint(self):
+        torch.save(self.state_dict(), self.checkpoint_file)
 
-class State_predictor(nn.Module):
-    def __init__(self, input_space, output_space, fc1_units=512, fc2_units=256):
-        super(State_predictor, self).__init__()
-        self.fc1 = nn.Linear(input_space, fc1_units)
-        self.fc1.to(device)
+    def load_checkpoint(self):
+        self.load_state_dict(torch.load(self.checkpoint_file))
+
+class ValueNetwork(nn.Module):
+    def __init__(self, lr, input_dims, fc1_units=512, fc2_units=256, name='value', chkpt_dir='tmp/sac'):
+        super(ValueNetwork, self).__init__()
+        self.checkpoint_dir = chkpt_dir
+        self.name = name
+        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'_SAC')
+
+        self.fc1 = nn.Linear(input_dims, fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
-        self.fc2.to(device)
-        self.fc3 = nn.Linear(fc2_units, output_space)
-        self.fc3.to(device)
-        #self.fcn = nn.Linear()
+        self.v = nn.Linear(fc2_units, 1)
 
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+        self.optimizer = optim.Adam(self.parameters(), lr = lr)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.to(self.device) 
+
+    def forward(self, state):
+        state_value = F.relu(self.fc1(state))
+        state_value = F.relu(self.fc2(state_value))
+
+        v = self.v(state_value)
+
+        return v   
+
+    def save_checkpoint(self):
+        torch.save(self.state_dict(), self.checkpoint_file)
+
+    def load_checkpoint(self):
+        self.load_state_dict(torch.load(self.checkpoint_file))  
+
 
 
 

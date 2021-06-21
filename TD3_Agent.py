@@ -11,7 +11,7 @@ Description:
 import numpy as np
 import random
 from collections import namedtuple, deque
-from model import Actor, Critic
+from model_TD3 import Actor, Critic
 import matplotlib.pyplot as plt
 
 import torch
