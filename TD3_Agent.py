@@ -50,6 +50,8 @@ class Agent():
         self.total_it = 0
         self.sigma = POLICY_NOISE
         self.tau=TAU
+        self.gamma = GAMMA
+        self.batch_size = BATCH_SIZE
 
         # The actor network
         self.actor_local = Actor(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
@@ -62,7 +64,7 @@ class Agent():
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
         
         # Replay memory
-        self.memory = ReplayBuffer(action_space, BUFFER_SIZE, BATCH_SIZE, random_seed)
+        self.memory = ReplayBuffer(BUFFER_SIZE, [state_space], action_space)
 
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
@@ -79,7 +81,7 @@ class Agent():
         '''
         Add memories to the replay Bugger
         '''
-        self.memory.add(state, action, reward, next_state, done)
+        self.memory.store_transition(state, action, reward, next_state, done)
         
     def save_network(self):
 
@@ -100,23 +102,6 @@ class Agent():
             self.actor_target.load_state_dict(torch.load(act_tar))
             self.critic_local.load_state_dict(torch.load(cr_loc))
             self.critic_target.load_state_dict(torch.load(cr_tar))
-        
-    def step(self):
-        '''
-        Get the current state, action, reward, next_state and done tuple and store it in the replay buffer.
-        Also check if already enough samples have been collected in order to start a training step
-        :param state: Current state of the environment
-        :param action: Action that has been chosen in current state
-        :param reward: The reward that has been received in current state
-        :param next_state: The next state that has been reached due to the current action
-        :param done: Parameter to see if an episode has finished
-        :return: -
-        '''
-
-        # Learn only if enough samples have already been collected
-        if self.memory.get_len() > BATCH_SIZE:
-            experiences = self.memory.sample()
-            self.learn(experiences, GAMMA)
 
     def act(self, state):
         '''
@@ -185,7 +170,7 @@ class Agent():
         self.noise.reset()
         
 
-    def learn(self, experiences, gamma):
+    def learn(self):
         '''
         Update policy and value parameters using given batch of experience tuples.
         Q_targets = r+ gamma * critic_target(next_state, actor_target(next_state)
@@ -203,8 +188,17 @@ class Agent():
         :param gamma: Value to determine the reward discount
         :return: -
         '''
+        if self.memory.mem_cntr < self.batch_size:
+            return
         self.total_it += 1
-        states, actions, rewards, next_states, dones = experiences
+        state, action, reward, new_state, done = \
+                self.memory.sample_buffer(self.batch_size)
+
+        rewards = torch.tensor(reward, dtype=torch.float).to(device)
+        dones = torch.tensor(done, dtype=torch.float).to(device)
+        next_states = torch.tensor(new_state, dtype=torch.float).to(device)
+        states = torch.tensor(state, dtype=torch.float).to(device)
+        actions = torch.tensor(action, dtype=torch.float).to(device)
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
@@ -213,11 +207,11 @@ class Agent():
              
             # Compute the target Q value
             target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
-            target_q = torch.min(target_Q1, target_Q2)
-            target_q = rewards + (gamma * target_q * (1 - dones))
+            target_q = torch.min(target_Q1.view(-1), target_Q2.view(-1))
+            target_q = rewards + (self.gamma * target_q * (1 - dones))
              
         current_Q1, current_Q2 = self.critic_local(states, actions)
-        critic_loss = F.mse_loss(current_Q1, target_q) + F.mse_loss(current_Q2, target_q)
+        critic_loss = F.mse_loss(current_Q1.view(-1), target_q) + F.mse_loss(current_Q2.view(-1), target_q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
@@ -260,56 +254,37 @@ class Agent():
             target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
 
 class ReplayBuffer():
-    def __init__(self, action_size, buffer_size, batch_size, seed):
-        '''
-        Initialize replay buffer
-        :param action_size: action size of environment
-        :param buffer_size: buffer size for replay buffer
-        :param batch_size: batch size to learn from
-        :param seed: random seed
-        '''
+    def __init__(self, max_size, input_shape, n_actions):
+        self.mem_size = max_size
+        self.mem_cntr = 0
+        self.state_memory = np.zeros((self.mem_size, *input_shape))
+        self.new_state_memory = np.zeros((self.mem_size, *input_shape))
+        self.action_memory = np.zeros((self.mem_size, n_actions))
+        self.reward_memory = np.zeros(self.mem_size)
+        self.terminal_memory = np.zeros(self.mem_size)
 
-        self.action_space = action_size
-        self.memory = deque(maxlen=buffer_size)
-        self.batch_size = batch_size
-        self.experience = namedtuple("Experience", field_names=["state", "action", "rewards", "next_states", "dones"])
-        self.seed = random.seed(seed)
+    def store_transition(self, state, action, reward, state_, done):
+        index = self.mem_cntr % self.mem_size
+        self.state_memory[index] = state
+        self.action_memory[index] = action
+        self.reward_memory[index] = reward
+        self.new_state_memory[index] = state_
+        self.terminal_memory[index] = done
 
-    def add(self, state, action, reward, next_state, done):
-        '''
-        Adding a nre state, action, reward, nect_state, done tuplt to the replay memory
-        :param state: Current state
-        :param action: Action taken in current state
-        :param reward: Reward that has been granted
-        :param next_state: Next state reached
-        :param done: Information if environment has finished
-        :return: -
-        '''
-        e = self.experience(state, action, reward, next_state, done)
-        self.memory.append(e)
+        self.mem_cntr += 1
 
-    def sample(self):
-        '''
-        Radnomly sample a batch
-        :return: A random selected batch of the memory
-        '''
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    def sample_buffer(self, batch_size):
+        max_mem = min(self.mem_cntr, self.mem_size)
 
-        experiences = random.sample(self.memory, k=self.batch_size)
+        batch = np.random.choice(max_mem, batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device)
-        rewards = torch.from_numpy(np.vstack([e.rewards for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_states for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.dones for e in experiences if e is not None])).float().to(device)
+        states = self.state_memory[batch]
+        actions = self.action_memory[batch]
+        rewards = self.reward_memory[batch]
+        states_ = self.new_state_memory[batch]
+        dones = self.terminal_memory[batch]
 
-        return (states, actions, rewards, next_states, dones)
-    
-    def get_len(self):
-        return len(self.memory)
-
-    #def __len__(self):
-     #   return len(self.memory)
+        return states, actions, rewards, states_, dones
     
 class OUNoise:
     """Ornstein-Uhlenbeck process."""
