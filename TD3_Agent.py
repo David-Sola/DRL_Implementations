@@ -23,7 +23,7 @@ import datetime
 
 
 BUFFER_SIZE = int(1e7)  # replay buffer size
-BATCH_SIZE = 100      # minibatch size
+BATCH_SIZE = 10      # minibatch size
 GAMMA = 0.98            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 1e-4         # learning rate of the actor
@@ -58,13 +58,18 @@ class Agent():
         self.actor_target = Actor(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.lr_actor)
 
-        # The critic network
-        self.critic_local = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
-        self.critic_target = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
-        self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
+        # The critic networks
+        self.critic_local1 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_target1 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_optimizer1 = optim.Adam(self.critic_local1.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
         
+        self.critic_local2 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_target2 = Critic(state_space, action_space, out_fcn, fc1_units, fc2_units).to(device)
+        self.critic_optimizer2 = optim.Adam(self.critic_local2.parameters(), lr=self.lr_critic, weight_decay=WEIGHT_DECAY)
+        
+
         # Replay memory
-        self.memory = ReplayBuffer(BUFFER_SIZE, [state_space], action_space)
+        self.memory = ReplayBufferLSTM2(BUFFER_SIZE)
 
         # Noise process
         self.noise = OUNoise(action_space, random_seed)
@@ -77,18 +82,22 @@ class Agent():
 
         self.t_step = 0
 
-    def add_memory(self, state, action, reward, next_state, done):
+    def add_memory(self, ini_hidden_in, ini_hidden_out, episode_state, episode_action, episode_last_action,
+                episode_reward, episode_next_state, episode_done):
         '''
         Add memories to the replay Bugger
         '''
-        self.memory.store_transition(state, action, reward, next_state, done)
+        self.memory.push(ini_hidden_in, ini_hidden_out, episode_state, episode_action, episode_last_action, \
+                episode_reward, episode_next_state, episode_done)
         
     def save_network(self):
 
         torch.save(self.actor_local.state_dict(), self.actor_local_path)
         torch.save(self.actor_target.state_dict(), self.actor_target_path)
-        torch.save(self.critic_local.state_dict(), self.critic_local_path)
-        torch.save(self.critic_target.state_dict(), self.critic_target_path)  
+        torch.save(self.critic_local1.state_dict(), self.critic_local_path)
+        torch.save(self.critic_target1.state_dict(), self.critic_target_path)  
+        torch.save(self.critic_local2.state_dict(), self.critic_local_path)
+        torch.save(self.critic_target2.state_dict(), self.critic_target_path)
         
     def load_network(self, own_path=1, act_loc='', act_tar='', cr_loc='', cr_tar=''):
         
@@ -103,7 +112,7 @@ class Agent():
             self.critic_local.load_state_dict(torch.load(cr_loc))
             self.critic_target.load_state_dict(torch.load(cr_tar))
 
-    def act(self, state):
+    def act(self, state, last_action, hidden_in):
         '''
         Functionality to determine the action in the current state.
         Additionally to the current action which is determined by the actor a normal distribution will be added to the
@@ -113,15 +122,16 @@ class Agent():
         :param sigma: Parameter which decays over time to make the normal distribution smaller
         :return: action which shall be performed in the environment
         '''
-        state = torch.from_numpy(state).float().to(device)
+        state = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).cuda()
+        last_action = torch.FloatTensor(last_action).unsqueeze(0).unsqueeze(0).cuda()
         self.actor_local.eval()
         with torch.no_grad():
-            action = self.actor_local(state).cpu().data.numpy()
+            action, hidden_out = self.actor_local(state, last_action, hidden_in)
         self.actor_local.train()
         
-        return np.clip(action, -1, 1)
+        return action.detach().cpu().numpy()[0][0], hidden_out
 
-    def act_noise(self, state, sigma):
+    def act_noise(self, state, last_action, hidden_in, sigma):
         '''
         Functionality to determine the action in the current state.
         Additionally to the current action which is determined by the actor a normal distribution will be added to the
@@ -131,17 +141,16 @@ class Agent():
         :param sigma: Parameter which decays over time to make the normal distribution smaller
         :return: action which shall be performed in the environment
         '''
-
+        state = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).cuda()
+        last_action = torch.FloatTensor(last_action).unsqueeze(0).unsqueeze(0).cuda()
+        self.actor_local.eval()
+        with torch.no_grad():
+            action, hidden_out = self.actor_local(state, last_action, hidden_in)
+        self.actor_local.train()
         noise = np.random.normal(0, sigma, 4)
-        state = torch.from_numpy(state).float().to(device)
-        self.actor_local.eval()
-        with torch.no_grad():
-            action = self.actor_local(state).cpu().data.numpy()
-        self.actor_local.train()
-
-        action = action + noise
+        action = action.detach().cpu().numpy()[0][0] + noise
         
-        return np.clip(action, -1, 1)
+        return np.clip(action, -1, 1) , hidden_out
         
         
     
@@ -188,45 +197,56 @@ class Agent():
         :param gamma: Value to determine the reward discount
         :return: -
         '''
-        if self.memory.mem_cntr < self.batch_size:
+        if self.memory.get_length() < self.batch_size:
             return
         self.total_it += 1
-        state, action, reward, new_state, done = \
-                self.memory.sample_buffer(self.batch_size)
+        hidden_in, hidden_out, state, action, last_action, reward, next_state, done =\
+             self.memory.sample(self.batch_size)
 
-        rewards = torch.tensor(reward, dtype=torch.float).to(device)
-        dones = torch.tensor(done, dtype=torch.float).to(device)
-        next_states = torch.tensor(new_state, dtype=torch.float).to(device)
-        states = torch.tensor(state, dtype=torch.float).to(device)
-        actions = torch.tensor(action, dtype=torch.float).to(device)
+        states          = torch.FloatTensor(state).to(device)
+        next_states     = torch.FloatTensor(next_state).to(device)
+        actions         = torch.FloatTensor(action).to(device)
+        last_actions    = torch.FloatTensor(last_action).to(device)
+        rewards         = torch.FloatTensor(reward).unsqueeze(-1).to(device)  
+        dones           = torch.FloatTensor(np.float32(done)).unsqueeze(-1).to(device)
         
         with torch.no_grad():  
             # Select action according to policy and add clipped noise
             noise = (torch.randn_like(actions) * POLICY_NOISE).clamp(-NOISE_CLIP, NOISE_CLIP)
-            next_actions = (self.actor_target(next_states) + noise).clamp(-1,1)
+            new_next_action, _ = self.actor_target(next_states, actions, hidden_out)
+            new_next_action = (new_next_action+noise).clamp(-1,1)
+            new_action, _ = self.actor_local(states, last_actions, hidden_in)
              
             # Compute the target Q value
-            target_Q1, target_Q2 = self.critic_target(next_states, next_actions)
-            target_q = torch.min(target_Q1.view(-1), target_Q2.view(-1))
+            target_Q1, _ = self.critic_target1(next_states, new_next_action, actions, hidden_out)
+            target_Q2, _ = self.critic_target2(next_states, new_next_action, actions, hidden_out)
+            target_q = torch.min(target_Q1, target_Q2)
             target_q = rewards + (self.gamma * target_q * (1 - dones))
              
-        current_Q1, current_Q2 = self.critic_local(states, actions)
-        critic_loss = F.mse_loss(current_Q1.view(-1), target_q) + F.mse_loss(current_Q2.view(-1), target_q)
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        ''' GRADIENT CLIPPING TO BE EVALUATED!!'''
-        #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(),1)
-        self.critic_optimizer.step()
+        current_Q1, _ = self.critic_local1(states, actions, last_actions, hidden_in)
+        current_Q2, _ = self.critic_local2(states, actions, last_actions, hidden_in)
+        critic_loss1 =((current_Q1 - target_q.detach())**2).mean() 
+        critic_loss2 =((current_Q2 - target_q.detach())**2).mean() 
+
+        self.critic_optimizer1.zero_grad()
+        critic_loss1.backward()
+        self.critic_optimizer1.step()
+
+        self.critic_optimizer2.zero_grad()
+        critic_loss2.backward()
+        self.critic_optimizer2.step()
         
         if self.total_it % POLICY_FREQ == 0:
             #Compute actor loss
-            actor_loss = -self.critic_local.Q1(states, self.actor_local(states)).mean()
+            predicted_new_q_value, _ = self.critic_local1(states, new_action, last_actions, hidden_in)
+            actor_loss = -predicted_new_q_value.mean()
             
             #Optimize the actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
-            self.soft_update(self.critic_local, self.critic_target, self.tau)
+            self.soft_update(self.critic_local1, self.critic_target1, self.tau)
+            self.soft_update(self.critic_local2, self.critic_target2, self.tau)
             self.soft_update(self.actor_local, self.actor_target, self.tau)
         
 
@@ -253,38 +273,56 @@ class Agent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0 - tau)*target_param.data)
 
-class ReplayBuffer():
-    def __init__(self, max_size, input_shape, n_actions):
-        self.mem_size = max_size
-        self.mem_cntr = 0
-        self.state_memory = np.zeros((self.mem_size, *input_shape))
-        self.new_state_memory = np.zeros((self.mem_size, *input_shape))
-        self.action_memory = np.zeros((self.mem_size, n_actions))
-        self.reward_memory = np.zeros(self.mem_size)
-        self.terminal_memory = np.zeros(self.mem_size)
+class ReplayBufferLSTM2:
+    """ 
+    Replay buffer for agent with LSTM network additionally storing previous action, 
+    initial input hidden state and output hidden state of LSTM.
+    And each sample contains the whole episode instead of a single step.
+    'hidden_in' and 'hidden_out' are only the initial hidden state for each episode, for LSTM initialization.
 
-    def store_transition(self, state, action, reward, state_, done):
-        index = self.mem_cntr % self.mem_size
-        self.state_memory[index] = state
-        self.action_memory[index] = action
-        self.reward_memory[index] = reward
-        self.new_state_memory[index] = state_
-        self.terminal_memory[index] = done
+    """
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buffer = []
+        self.position = 0
 
-        self.mem_cntr += 1
+    def push(self, hidden_in, hidden_out, state, action, last_action, reward, next_state, done):
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(None)
+        self.buffer[self.position] = (hidden_in, hidden_out, state, action, last_action, reward, next_state, done)
+        self.position = int((self.position + 1) % self.capacity)  # as a ring buffer
 
-    def sample_buffer(self, batch_size):
-        max_mem = min(self.mem_cntr, self.mem_size)
+    def sample(self, batch_size):
+        s_lst, a_lst, la_lst, r_lst, ns_lst, hi_lst, ci_lst, ho_lst, co_lst, d_lst=[],[],[],[],[],[],[],[],[],[]
+        batch = random.sample(self.buffer, batch_size)
+        for sample in batch:
+            (h_in, c_in), (h_out, c_out), state, action, last_action, reward, next_state, done = sample
+            s_lst.append(state) 
+            a_lst.append(action)
+            la_lst.append(last_action)
+            r_lst.append(reward)
+            ns_lst.append(next_state)
+            d_lst.append(done)
+            hi_lst.append(h_in)  # h_in: (1, batch_size=1, hidden_size)
+            ci_lst.append(c_in)
+            ho_lst.append(h_out)
+            co_lst.append(c_out)
+        hi_lst = torch.cat(hi_lst, dim=-2).detach() # cat along the batch dim
+        ho_lst = torch.cat(ho_lst, dim=-2).detach()
+        ci_lst = torch.cat(ci_lst, dim=-2).detach()
+        co_lst = torch.cat(co_lst, dim=-2).detach()
 
-        batch = np.random.choice(max_mem, batch_size)
+        hidden_in = (hi_lst, ci_lst)
+        hidden_out = (ho_lst, co_lst)
 
-        states = self.state_memory[batch]
-        actions = self.action_memory[batch]
-        rewards = self.reward_memory[batch]
-        states_ = self.new_state_memory[batch]
-        dones = self.terminal_memory[batch]
+        return hidden_in, hidden_out, s_lst, a_lst, la_lst, r_lst, ns_lst, d_lst
 
-        return states, actions, rewards, states_, dones
+    def __len__(
+            self):  # cannot work in multiprocessing case, len(replay_buffer) is not available in proxy of manager!
+        return len(self.buffer)
+
+    def get_length(self):
+        return len(self.buffer)
     
 class OUNoise:
     """Ornstein-Uhlenbeck process."""

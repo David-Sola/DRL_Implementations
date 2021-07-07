@@ -12,6 +12,7 @@ import gym
 from TD3_Agent import Agent
 import matplotlib.pyplot as plt
 from collections import deque
+import torch
 
 
 # Change betweend Hardcore or non Hardcore version
@@ -35,7 +36,7 @@ max_episodes = 10000
 episode_range = 300
 
 # How many episodes random actions shall be taken
-n_rand_actions = 100
+n_rand_actions = 50
 
 # Best reward from all episodes
 best_reward = -999
@@ -58,9 +59,18 @@ total_int = 0
 
 # Creation of the agent which shall be trained
 agent = Agent(24, 4, random_seed=2)
+episode_state = []
+episode_action = []
+episode_last_action = []
+episode_reward = []
+episode_next_state = []
+episode_done = []
 
 ''' START OF THE WHOLE TRAINING LOOP '''
 for i_episode in range(max_episodes):
+    last_action = env.action_space.sample()
+    hidden_out = (torch.zeros([1, 1, 256], dtype=torch.float).cuda(), \
+                torch.zeros([1, 1, 256], dtype=torch.float).cuda())
 
     accumulated_reward = 0
 
@@ -69,23 +79,40 @@ for i_episode in range(max_episodes):
    
     ''' START OF THE TRAINING LOOP FOR EACH EPISODE '''
     for t in range(episode_range):
-        
+        hidden_in = hidden_out
         total_int += 1
         # Take an action with the agent with added noise in the current state
         # For the first n episodes take random actions
-        if i_episode < n_rand_actions:
-            action = env.action_space.sample()
-        else:
-            action = agent.act_noise(state, 0)    
-        
         # Get the feedback from the environment by performing the action
+        if i_episode < n_rand_actions:
+            action, hidden_out = agent.act_noise(state, last_action, hidden_in, 0.4)   
+        else:
+            action, hidden_out = agent.act_noise(state, last_action, hidden_in, 0.1)     
         next_state, reward, done, info = env.step(action)
            
         # Accumulate the reward to get the reward at the end of the episode
         accumulated_reward = accumulated_reward + reward
-        
+        if t == 0:
+            ini_hidden_in = hidden_in
+            ini_hidden_out = hidden_out
         # Add the state, action, next_state, reward transition into the replay buffer
-        agent.add_memory(state, action, reward, next_state, done)
+        episode_state.append(state)
+        episode_action.append(action)
+        episode_last_action.append(last_action)
+        episode_reward.append(reward)
+        episode_next_state.append(next_state)
+        episode_done.append(done) 
+        if len(episode_state) == 20:
+                agent.add_memory(ini_hidden_in, ini_hidden_out, episode_state, episode_action, episode_last_action, \
+                                episode_reward, episode_next_state, episode_done)
+                ini_hidden_in = hidden_in
+                ini_hidden_out = hidden_out
+                episode_state = []
+                episode_action = []
+                episode_last_action = []
+                episode_reward = []
+                episode_next_state = []
+                episode_done = []
         
         # Take a step with the agent in order to learn but collect first 
         # sufficient amount of data
@@ -94,6 +121,7 @@ for i_episode in range(max_episodes):
         
         # Assign the next state to the current state
         state = next_state
+        last_action = action
         
         # If the episode is done finish the loop
         if done:
@@ -121,10 +149,15 @@ for i_episode in range(max_episodes):
         nr_eval_episodes = 10
         for eval_episodes in range(nr_eval_episodes):
             state, done = env.reset(), False
+            last_action = env.action_space.sample()
+            hidden_out = (torch.zeros([1, 1, 256], dtype=torch.float).cuda(), \
+                torch.zeros([1, 1, 256], dtype=torch.float).cuda())
             while not done:
-                action = agent.act(state) 
+                hidden_in = hidden_out
+                action, hidden_out = agent.act(state, last_action, hidden_in)   
                 state, reward, done, info = env.step(action)
                 average_rew += reward
+                last_action = action
         average_rew /= nr_eval_episodes
         
         plt.pause(0.1)
